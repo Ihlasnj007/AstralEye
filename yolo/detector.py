@@ -31,3 +31,24 @@ def detect_weapons(image_path):
             })
 
     return detections
+
+def detect_video(video_path):
+    """
+    Runs YOLO inference on a video
+    Returns detection summary
+    """
+    results = model(video_path)
+
+    detection_summary = []
+
+    for result in results:
+        for box in result.boxes:
+            cls_id = int(box.cls)
+            conf = float(box.conf)
+
+            detection_summary.append({
+                "label": model.names[cls_id],
+                "confidence": round(conf, 3)
+            })
+
+    return detection_summary
