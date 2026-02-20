@@ -10,7 +10,7 @@ from django.core.files.base import ContentFile
 # CONFIGURATION
 # ==============================
 
-CONF_THRESHOLD = 0.5          # Minimum confidence to trigger alert
+CONF_THRESHOLD = 0.8          # Minimum confidence to trigger alert
 ALERT_COOLDOWN = 10           # Seconds between alerts
 FRAME_SKIP = 15               # Process 1 frame every 15 frames
 INFERENCE_SIZE = 640          # Increase detection resolution

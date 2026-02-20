@@ -1,20 +1,24 @@
 # yolo/detector.py
+
 import os
+import torch
 from ultralytics import YOLO
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 MODEL_PATH = os.path.join(BASE_DIR, "yolo", "best.pt")
 
-# Load model once when Django starts
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+print(f"[INFO] Loading model on device: {device}")
+
 model = YOLO(MODEL_PATH)
 
-def detect_weapons(image_path):
-    """
-    Runs YOLO inference on an image
-    Returns list of detected weapons
-    """
-    results = model(image_path)
+# Let Ultralytics handle precision internally
+model.to(device)
+
+
+def detect_weapons(image_path, imgsz=640):
+    results = model(image_path, imgsz=imgsz, verbose=False)
 
     detections = []
 
@@ -32,12 +36,9 @@ def detect_weapons(image_path):
 
     return detections
 
-def detect_video(video_path):
-    """
-    Runs YOLO inference on a video
-    Returns detection summary
-    """
-    results = model(video_path)
+
+def detect_video(video_path, imgsz=640):
+    results = model(video_path, imgsz=imgsz, verbose=False)
 
     detection_summary = []
 
