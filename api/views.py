@@ -1,14 +1,20 @@
 import os
+import cv2
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from yolo.detector import detect_weapons
-from yolo.detector import detect_video
+from yolo.detector import model
 from .models import Alert
+
+
+# ==============================
+# IMAGE DETECTION API
+# ==============================
 
 @csrf_exempt
 def detect_api(request):
+
     if request.method != 'POST':
         return JsonResponse({"error": "POST request required"}, status=400)
 
@@ -23,41 +29,37 @@ def detect_api(request):
         for chunk in image_file.chunks():
             f.write(chunk)
 
-    # Run detection
-    detections = detect_weapons(image_path)
+    # Read image using OpenCV
+    frame = cv2.imread(image_path)
 
-    return JsonResponse({
-        "detections": detections
-    })
+    # Run YOLO inference
+    results = model(frame, imgsz=640, verbose=False)
 
+    detections = []
 
-@csrf_exempt
-def detect_video_api(request):
-    if request.method != 'POST':
-        return JsonResponse({"error": "POST request required"}, status=400)
+    for result in results:
+        for box in result.boxes:
+            cls_id = int(box.cls)
+            conf = float(box.conf)
 
-    if 'video' not in request.FILES:
-        return JsonResponse({"error": "No video provided"}, status=400)
+            detections.append({
+                "label": model.names[cls_id],
+                "confidence": round(conf, 3)
+            })
 
-    video_file = request.FILES['video']
-
-    video_path = os.path.join(settings.MEDIA_ROOT, "upload_" + video_file.name)
-    with open(video_path, 'wb+') as f:
-        for chunk in video_file.chunks():
-            f.write(chunk)
-
-    detections = detect_video(video_path)
-
-    return JsonResponse({
-        "detections": detections
-    })
+    return JsonResponse({"detections": detections})
 
 
+# ==============================
+# GET ALERTS (REAL-TIME SYSTEM)
+# ==============================
 
 def get_alerts(request):
+
     alerts = Alert.objects.filter(is_viewed=False).order_by('-created_at')
 
     data = []
+
     for alert in alerts:
         data.append({
             "id": alert.id,
