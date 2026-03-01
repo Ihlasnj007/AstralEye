@@ -30,7 +30,7 @@ ALERT_COOLDOWN = 10
 FRAME_SKIP = 15
 INFERENCE_SIZE = 640
 
-CLASSIFIER_THRESHOLD = 0.80  # Increased (based on 99.43% accuracy)
+CLASSIFIER_THRESHOLD = 0.80
 
 last_alert_time = 0
 
@@ -41,7 +41,7 @@ last_alert_time = 0
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-NUM_CLASSES = 3  # Gun, Knife, Background
+NUM_CLASSES = 3  # background, gun, knife (alphabetical order)
 
 classifier_model = models.efficientnet_b0(weights=None)
 classifier_model.classifier[1] = torch.nn.Linear(
@@ -58,9 +58,9 @@ classifier_model.load_state_dict(
 classifier_model.to(DEVICE)
 classifier_model.eval()
 
-CLASS_NAMES = ["gun", "knife", "background"]
+# IMPORTANT: Match ImageFolder alphabetical order
+CLASS_NAMES = ["background", "gun", "knife"]
 
-# Create transform once (performance optimized)
 CLASSIFIER_TRANSFORM = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -76,16 +76,11 @@ CLASSIFIER_TRANSFORM = transforms.Compose([
 # ==============================
 
 def weapon_classifier(cropped_img, expected_label):
-    """
-    Stage 2 validation using EfficientNet-B0 classifier.
-    """
 
     if cropped_img is None or cropped_img.size == 0:
         return False
 
-    # Convert OpenCV BGR → RGB
     cropped_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
-
     pil_image = Image.fromarray(cropped_img)
 
     input_tensor = CLASSIFIER_TRANSFORM(pil_image).unsqueeze(0).to(DEVICE)
@@ -93,7 +88,6 @@ def weapon_classifier(cropped_img, expected_label):
     with torch.no_grad():
         outputs = classifier_model(input_tensor)
         probabilities = F.softmax(outputs, dim=1)
-
         confidence, predicted = torch.max(probabilities, 1)
 
     predicted_label = CLASS_NAMES[predicted.item()]
@@ -101,11 +95,11 @@ def weapon_classifier(cropped_img, expected_label):
 
     print(f"[CLASSIFIER] {predicted_label} ({round(confidence, 2)})")
 
-    # Reject background immediately
+    # Reject background
     if predicted_label == "background":
         return False
 
-    # Accept only if matches YOLO label + strong confidence
+    # Accept only if matches YOLO label and passes threshold
     if predicted_label == expected_label and confidence >= CLASSIFIER_THRESHOLD:
         return True
 
@@ -153,7 +147,6 @@ def start_detection(source=None):
     while True:
         ret, frame = cap.read()
 
-        # Auto reconnect
         if not ret:
             print("[WARNING] Frame read failed. Reconnecting...")
             cap.release()
@@ -163,7 +156,6 @@ def start_detection(source=None):
 
         frame_count += 1
 
-        # Performance control
         if frame_count % FRAME_SKIP != 0:
             continue
 
@@ -172,10 +164,7 @@ def start_detection(source=None):
         gun_candidates = []
         knife_candidates = []
 
-        # ==============================
-        # STAGE 1 - HIGH RECALL YOLO
-        # ==============================
-
+        # STAGE 1 - YOLO
         for result in results:
             for box in result.boxes:
 
@@ -190,17 +179,15 @@ def start_detection(source=None):
                 elif label == "knife" and conf >= KNIFE_THRESHOLD:
                     knife_candidates.append((conf, x1, y1, x2, y2))
 
-        # Sort highest confidence first
         gun_candidates.sort(reverse=True)
         knife_candidates.sort(reverse=True)
 
-        # Limit per frame
         gun_candidates = gun_candidates[:MAX_CANDIDATES_PER_CLASS]
         knife_candidates = knife_candidates[:MAX_CANDIDATES_PER_CLASS]
 
         current_time = time.time()
 
-        # ---- GUN VALIDATION ----
+        # VALIDATE GUNS
         for conf, x1, y1, x2, y2 in gun_candidates:
 
             print(f"[CANDIDATE] GUN ({round(conf,2)})")
@@ -219,13 +206,12 @@ def start_detection(source=None):
             cropped = frame[y1_p:y2_p, x1_p:x2_p]
 
             if weapon_classifier(cropped, "gun"):
-
                 if current_time - last_alert_time > ALERT_COOLDOWN:
                     print(f"[CONFIRMED ALERT] GUN verified ({round(conf,2)})")
                     save_alert(frame, "gun", conf)
                     last_alert_time = current_time
 
-        # ---- KNIFE VALIDATION ----
+        # VALIDATE KNIVES
         for conf, x1, y1, x2, y2 in knife_candidates:
 
             print(f"[CANDIDATE] KNIFE ({round(conf,2)})")
@@ -244,7 +230,6 @@ def start_detection(source=None):
             cropped = frame[y1_p:y2_p, x1_p:x2_p]
 
             if weapon_classifier(cropped, "knife"):
-
                 if current_time - last_alert_time > ALERT_COOLDOWN:
                     print(f"[CONFIRMED ALERT] KNIFE verified ({round(conf,2)})")
                     save_alert(frame, "knife", conf)
