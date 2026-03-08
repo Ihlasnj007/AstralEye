@@ -18,6 +18,7 @@ from django.core.files.base import ContentFile
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
 # ==============================
 # CONFIGURATION (Extreme Recall Mode)
 # ==============================
@@ -41,28 +42,35 @@ last_alert_time = 0
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-NUM_CLASSES = 3  # background, gun, knife (alphabetical order)
+NUM_CLASSES = 3  # background, gun, knife
 
-classifier_model = models.efficientnet_b0(weights=None)
-classifier_model.classifier[1] = torch.nn.Linear(
-    classifier_model.classifier[1].in_features,
-    NUM_CLASSES
+# IMPORTANT: must match training architecture
+classifier_model = models.efficientnet_b1(weights=None)
+
+in_features = classifier_model.classifier[1].in_features
+
+classifier_model.classifier = torch.nn.Sequential(
+    torch.nn.Dropout(0.4),
+    torch.nn.Linear(in_features, NUM_CLASSES)
 )
 
 CLASSIFIER_PATH = os.path.join(BASE_DIR, "classifier", "best_classifier.pth")
 
 classifier_model.load_state_dict(
-    torch.load(CLASSIFIER_PATH, map_location=DEVICE)
+    torch.load(CLASSIFIER_PATH, map_location=DEVICE, weights_only=True)
 )
 
 classifier_model.to(DEVICE)
 classifier_model.eval()
 
-# IMPORTANT: Match ImageFolder alphabetical order
+
+# IMPORTANT: match ImageFolder order
 CLASS_NAMES = ["background", "gun", "knife"]
 
+
+# IMPORTANT: match training input size
 CLASSIFIER_TRANSFORM = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((240, 240)),
     transforms.ToTensor(),
     transforms.Normalize(
         mean=[0.485, 0.456, 0.406],
@@ -86,20 +94,20 @@ def weapon_classifier(cropped_img, expected_label):
     input_tensor = CLASSIFIER_TRANSFORM(pil_image).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
+
         outputs = classifier_model(input_tensor)
         probabilities = F.softmax(outputs, dim=1)
+
         confidence, predicted = torch.max(probabilities, 1)
 
     predicted_label = CLASS_NAMES[predicted.item()]
     confidence = confidence.item()
 
-    print(f"[CLASSIFIER] {predicted_label} ({round(confidence, 2)})")
+    print(f"[CLASSIFIER] {predicted_label} ({round(confidence,2)})")
 
-    # Reject background
     if predicted_label == "background":
         return False
 
-    # Accept only if matches YOLO label and passes threshold
     if predicted_label == expected_label and confidence >= CLASSIFIER_THRESHOLD:
         return True
 
@@ -111,6 +119,7 @@ def weapon_classifier(cropped_img, expected_label):
 # ==============================
 
 def save_alert(frame, label, confidence):
+
     _, buffer = cv2.imencode('.jpg', frame)
 
     image_file = ContentFile(
@@ -130,6 +139,7 @@ def save_alert(frame, label, confidence):
 # ==============================
 
 def start_detection(source=None):
+
     global last_alert_time
 
     print("[INFO] High-Recall Two-Stage Engine Started")
@@ -145,10 +155,13 @@ def start_detection(source=None):
     frame_count = 0
 
     while True:
+
         ret, frame = cap.read()
 
         if not ret:
+
             print("[WARNING] Frame read failed. Reconnecting...")
+
             cap.release()
             time.sleep(2)
             cap = cv2.VideoCapture(source)
@@ -164,13 +177,18 @@ def start_detection(source=None):
         gun_candidates = []
         knife_candidates = []
 
+        # ==============================
         # STAGE 1 - YOLO
+        # ==============================
+
         for result in results:
             for box in result.boxes:
 
                 conf = float(box.conf)
                 cls_id = int(box.cls)
+
                 label = model.names[cls_id]
+
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                 if label == "gun" and conf >= GUN_THRESHOLD:
@@ -187,7 +205,10 @@ def start_detection(source=None):
 
         current_time = time.time()
 
+        # ==============================
         # VALIDATE GUNS
+        # ==============================
+
         for conf, x1, y1, x2, y2 in gun_candidates:
 
             print(f"[CANDIDATE] GUN ({round(conf,2)})")
@@ -206,12 +227,20 @@ def start_detection(source=None):
             cropped = frame[y1_p:y2_p, x1_p:x2_p]
 
             if weapon_classifier(cropped, "gun"):
+
                 if current_time - last_alert_time > ALERT_COOLDOWN:
+
                     print(f"[CONFIRMED ALERT] GUN verified ({round(conf,2)})")
+
                     save_alert(frame, "gun", conf)
+
                     last_alert_time = current_time
 
+
+        # ==============================
         # VALIDATE KNIVES
+        # ==============================
+
         for conf, x1, y1, x2, y2 in knife_candidates:
 
             print(f"[CANDIDATE] KNIFE ({round(conf,2)})")
@@ -230,9 +259,14 @@ def start_detection(source=None):
             cropped = frame[y1_p:y2_p, x1_p:x2_p]
 
             if weapon_classifier(cropped, "knife"):
+
                 if current_time - last_alert_time > ALERT_COOLDOWN:
+
                     print(f"[CONFIRMED ALERT] KNIFE verified ({round(conf,2)})")
+
                     save_alert(frame, "knife", conf)
+
                     last_alert_time = current_time
 
         time.sleep(0.05)
+        

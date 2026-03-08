@@ -12,7 +12,7 @@ class ApiConfig(AppConfig):
 
         from .detection_engine import start_detection
 
-        ip_camera_url = "http://192.168.120.155:8080/video"
+        ip_camera_url = "http://10.18.184.61:8080/video"
 
         threading.Thread(
             target=start_detection,
